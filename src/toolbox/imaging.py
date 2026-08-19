@@ -80,9 +80,9 @@ class VideoRecorder:
     def recording(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def start(self, timeout: float = 5.0) -> None:
+    def start(self, timeout: float = 15.0) -> None:
         """Start recording and wait until the camera/writer is ready."""
-        if self.recording:
+        if self.recording: # if self.recording is TRUE already
             raise RuntimeError(f"Camera {self.camera_index} is already recording.")
         self.video_path.parent.mkdir(parents=True, exist_ok=True)
         self.timestamp_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +92,7 @@ class VideoRecorder:
         self._started_event.clear()
         self._thread = threading.Thread(
             target=self._record, name=f"camera-{self.camera_index}", daemon=True
-        )
+        ) # because record contains blocking operations
         self._thread.start()
         if not self._started_event.wait(timeout):
             self.stop()
@@ -176,7 +176,7 @@ class CameraDisplay:
         cameras: list[int],
         *,
         window_name: str = "Detected cameras",
-        tile_size: tuple[int, int] = (480, 270),
+        tile_size: tuple[int, int] = (480 * 2, 270 * 2),
     ) -> None:
         self.cameras = list(cameras)
         self.window_name = window_name

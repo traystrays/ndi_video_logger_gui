@@ -44,6 +44,7 @@ class DataCollectionApp:
         self.ecm_right = tk.StringVar()
         self.us_camera = tk.StringVar()
         self.use_quaternions = tk.BooleanVar(value=True)
+        self.video_only = tk.BooleanVar(value=False)
         self.status = tk.StringVar(value="Ready. Refresh cameras, then preview them.")
 
         self.recorders: list[VideoRecorder] = []
@@ -74,11 +75,15 @@ class DataCollectionApp:
             row=2, column=1, columnspan=2, sticky="ew", pady=10
         )
         ttk.Checkbutton(
-            container, text="Store NDI quaternions", variable=self.use_quaternions
+            container, text="Store NDI as quaternions", variable=self.use_quaternions
         ).grid(row=3, column=1, sticky="w", pady=3)
+        ttk.Checkbutton(
+            container, text="record Video Only", variable=self.video_only
+        ).grid(row=4, column=1, sticky="w", pady=3)
+        
 
         camera_box = ttk.LabelFrame(container, text="Camera/frame selection", padding=8)
-        camera_box.grid(row=4, column=0, columnspan=3, sticky="ew", pady=10)
+        camera_box.grid(row=5, column=0, columnspan=3, sticky="ew", pady=10)
         camera_box.columnconfigure((0, 1, 2), weight=1, uniform="cameras")
 
         camera_specs = (
@@ -110,7 +115,7 @@ class DataCollectionApp:
         )
 
         previews = ttk.Frame(container)
-        previews.grid(row=5, column=0, columnspan=3, sticky="ew")
+        previews.grid(row=6, column=0, columnspan=3, sticky="ew")
         previews.columnconfigure((0, 1, 2), weight=1, uniform="previews")
         self.preview_labels: dict[str, ttk.Label] = {}
         for column, source in enumerate(("ECM left", "ECM right", "Ultrasound")):
@@ -119,7 +124,7 @@ class DataCollectionApp:
             self.preview_labels[source] = label
 
         controls = ttk.Frame(container)
-        controls.grid(row=6, column=0, columnspan=3, pady=10)
+        controls.grid(row=7, column=0, columnspan=3, pady=10)
         self.start_button = ttk.Button(controls, text="Start all", command=self.start)
         self.start_button.grid(row=0, column=0, padx=5)
         self.stop_button = ttk.Button(
@@ -127,7 +132,7 @@ class DataCollectionApp:
         )
         self.stop_button.grid(row=0, column=1, padx=5)
         ttk.Label(container, textvariable=self.status, wraplength=900).grid(
-            row=7, column=0, columnspan=3, sticky="w"
+            row=8, column=0, columnspan=3, sticky="w"
         )
 
     def _path_row(
@@ -170,8 +175,8 @@ class DataCollectionApp:
             self.ecm_right.set(values[1] if len(values) > 1 else values[0])
             self.us_camera.set(values[2] if len(values) > 2 else values[0])
             self.status.set(f"Found camera indices: {', '.join(values)}")
-            if self._camera_display is None or not self._camera_display.showing:
-                self._camera_display = display(cameras)
+            # if self._camera_display is None or not self._camera_display.showing:
+            #     self._camera_display = display(cameras)
         else:
             self.status.set("No cameras were found.")
 
@@ -211,10 +216,12 @@ class DataCollectionApp:
             )
         output = Path(self.output_dir.get()).expanduser()
         rom = Path(self.rom_path.get()).expanduser()
-        if not rom.is_file() or rom.suffix.lower() != ".rom":
-            raise FileNotFoundError(f"Select an existing .rom file: {rom}")
-        if not self.serial_port.get().strip():
-            raise ValueError("Enter the NDI serial port.")
+        video_only = self.video_only.get()
+        if not video_only:
+            if not rom.is_file() or rom.suffix.lower() != ".rom":
+                raise FileNotFoundError(f"Select an existing .rom file: {rom}")
+            if not self.serial_port.get().strip():
+                raise ValueError("Enter the NDI serial port.")
         if not self.ecm_left.get() or not self.ecm_right.get() or not self.us_camera.get():
             raise ValueError("Select ECM left, ECM right, and ultrasound cameras.")
         ecm_left = int(self.ecm_left.get())
@@ -225,7 +232,7 @@ class DataCollectionApp:
         return {
             "output": output, "rom": rom, "port": self.serial_port.get().strip(),
             "ecm_left": ecm_left, "ecm_right": ecm_right, "us": us,
-            "quaternions": self.use_quaternions.get(),
+            "quaternions": self.use_quaternions.get(), "video_only": video_only,
         }
 
     def _start_workers(self, config: dict[str, object]) -> None:
@@ -233,7 +240,14 @@ class DataCollectionApp:
         output = config["output"]
         assert isinstance(output, Path)
         output.mkdir(parents=True, exist_ok=True)
+        self.ndi_logger = None
         self.recorders = [
+            
+            VideoRecorder(
+                int(config["us"]), output / f"us_{stamp}.mp4",
+                output / f"us_{stamp}_timestamps.txt",
+                frame_callback=lambda _, frame: self._messages.put(("Ultrasound", frame)),
+            ),
             VideoRecorder(
                 int(config["ecm_left"]), output / f"ecm_left_{stamp}.mp4",
                 output / f"ecm_left_{stamp}_timestamps.txt",
@@ -244,23 +258,21 @@ class DataCollectionApp:
                 output / f"ecm_right_{stamp}_timestamps.txt",
                 frame_callback=lambda _, frame: self._messages.put(("ECM right", frame)),
             ),
-            VideoRecorder(
-                int(config["us"]), output / f"us_{stamp}.mp4",
-                output / f"us_{stamp}_timestamps.txt",
-                frame_callback=lambda _, frame: self._messages.put(("Ultrasound", frame)),
-            ),
+
         ]
-        self.ndi_logger = NDIDataLogger(
-            output / f"ndi_{stamp}.csv", config["rom"], str(config["port"]),
-            use_quaternions=bool(config["quaternions"]),
-        )
+        if not bool(config["video_only"]):
+            self.ndi_logger = NDIDataLogger(
+                output / f"ndi_{stamp}.csv", config["rom"], str(config["port"]),
+                use_quaternions=bool(config["quaternions"]),
+            )
         started: list[object] = []
         try:
             for recorder in self.recorders:
                 recorder.start()
                 started.append(recorder)
-            self.ndi_logger.start()
-            started.append(self.ndi_logger)
+            if self.ndi_logger is not None:
+                self.ndi_logger.start()
+                started.append(self.ndi_logger)
             self._messages.put(("started", output))
         except Exception as error:
             for worker in reversed(started):
@@ -301,7 +313,8 @@ class DataCollectionApp:
                     self._show_frame(kind, value)
                 elif kind == "started":
                     self.stop_button.configure(state="normal")
-                    self.status.set(f"Recording all streams in {value}")
+                    mode = "videos only" if self.video_only.get() else "all streams"
+                    self.status.set(f"Recording {mode} in {value}")
                 elif kind == "error":
                     self.start_button.configure(state="normal")
                     self.status.set("Collection failed to start.")

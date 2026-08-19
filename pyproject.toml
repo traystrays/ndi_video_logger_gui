@@ -1,0 +1,29 @@
+[project]
+name = "ndi-video-logger"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Tracy", email = "tracy_sun@outlook.com" }
+]
+
+requires-python = ">=3.11,<3.12"
+
+dependencies = [
+    "ndicapi==3.7.5",
+    "numpy==1.26.4",
+    "opencv-python",
+    "pandas",
+    "pyserial==3.5",
+    "python_qt_binding==0.3.4",
+    "scikit-surgerycore==0.6.10",
+    "scikit-surgerynditracker==0.2.4",
+    "six==1.16.0",
+]
+
+[project.scripts]
+ndi-video-logger = "ndi_video_logger:main"
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
